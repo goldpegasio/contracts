@@ -32,8 +32,8 @@ contract PrivateSale is Auth {
 
   mapping (address => User) private users;
 
-  event Bought(address _user, uint _amount, uint _round);
-  event Claimed(address _user, uint _amount);
+  event Bought(address indexed _user, uint _amount, uint _round);
+  event Claimed(address indexed _user, uint _amount);
   event WhiteListUpdated(bool _open);
 
   constructor(

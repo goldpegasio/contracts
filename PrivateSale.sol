@@ -128,15 +128,15 @@ contract PrivateSale is Auth {
     }
   }
 
-  function myInfo(address _address) public view returns (uint, uint) {
-    User storage user = users[_address];
+  function myInfo() public view returns (uint, uint) {
+    User storage user = users[_msgSender()];
     uint userSpent;
     uint userToken;
     for (uint i = 1; i <= totalRound; i++) {
       userSpent = userSpent.add(user.amounts[i].div(1e18).mul(prices[i]));
       userToken = userToken.add(user.amounts[i]);
     }
-    return [userSpent, userToken];
+    return (userSpent, userToken);
   }
 
   // PRIVATE FUNCTIONS

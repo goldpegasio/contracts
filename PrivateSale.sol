@@ -32,7 +32,7 @@ contract PrivateSale is Auth {
 
   mapping (address => User) private users;
 
-  event Bought(address indexed _user, uint _amount, uint _round);
+  event Bought(address indexed _user, uint _amount, uint _round, uint _timestamp);
   event Claimed(address indexed _user, uint _amount);
   event WhiteListUpdated(bool _open);
 
@@ -128,6 +128,17 @@ contract PrivateSale is Auth {
     }
   }
 
+  function myInfo(address _address) public view returns (uint, uint) {
+    User storage user = users[_address];
+    uint userSpent;
+    uint userToken;
+    for (uint i = 1; i <= totalRound; i++) {
+      userSpent = userSpent.add(user.amounts[i].div(1e18).mul(prices[i]));
+      userToken = userToken.add(user.amounts[i]);
+    }
+    return [userSpent, userToken];
+  }
+
   // PRIVATE FUNCTIONS
 
   function _updateRound() private {
@@ -153,13 +164,13 @@ contract PrivateSale is Auth {
       sold[currentRound] = sold[currentRound].add(willSaleTokenAmount);
       usdtToken.transferFrom(_msgSender(), address(this), _usdtAmount);
       usdtToken.transfer(usdtHolder, _usdtAmount);
-      emit Bought(_user.userAddress, willSaleTokenAmount, currentRound);
+      emit Bought(_user.userAddress, willSaleTokenAmount, currentRound, block.timestamp);
     } else {
       _user.amounts[currentRound] = _user.amounts[currentRound].add(tokenLeftInRound);
       sold[currentRound] = sold[currentRound].add(tokenLeftInRound);
       usdtToken.transferFrom(_msgSender(), address(this), usdtLeftInRound);
       usdtToken.transfer(usdtHolder, usdtLeftInRound);
-      emit Bought(_user.userAddress, tokenLeftInRound, currentRound);
+      emit Bought(_user.userAddress, tokenLeftInRound, currentRound, block.timestamp);
       if (currentRound == totalRound) {
         return;
       }

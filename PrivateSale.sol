@@ -16,13 +16,14 @@ contract PrivateSale is Auth {
   IGDP public gdpToken;
   IBEP20 public usdtToken;
 
-  uint[] public amounts = [0, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 1e5, 2e5, 2e5, 2e5, 2e5, 2e5, 3e5, 3e5, 3e5, 3e5, 3e5];
-  uint[] public prices = [0, 30e16, 36e16, 42e16, 48e16, 54e16, 60e16, 66e16, 72e16, 78e16, 84e16, 90e16, 96e16, 102e16, 108e16, 114e16, 120e16, 126e16, 132e16, 138e16, 144e16];
+  uint[] public amounts = [0, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 2e24, 2e24, 2e24, 2e24, 2e24, 3e24, 3e24, 3e24, 3e24, 3e24];
+  uint[] public prices = [0, 30e15, 36e15, 42e15, 48e15, 54e15, 60e15, 66e15, 72e15, 78e15, 84e15, 90e15, 96e15, 102e15, 108e15, 114e15, 120e15, 126e15, 132e15, 138e15, 144e15];
   uint[] public sold = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   uint public cap = 1e25;
-  uint constant blocksPerRound = 144000; // 5 days
+  uint constant decimal18 = 1e18;
+  uint public constant blocksPerRound = 144000; // 5 days
   uint constant totalRound = 20;
-  uint constant privateSaleAllocation = 35e23;
+  uint constant privateSaleAllocation = 35e24;
   address private usdtHolder;
   uint public roundStartBlock;
   bool public openSale;
@@ -35,6 +36,7 @@ contract PrivateSale is Auth {
   event Bought(address indexed _user, uint _amount, uint _round, uint _timestamp);
   event Claimed(address indexed _user, uint _amount);
   event WhiteListUpdated(bool _open);
+  event RoundUpdated(uint _currentRound);
 
   constructor(
     address _mainAdmin,
@@ -59,6 +61,7 @@ contract PrivateSale is Auth {
   }
 
   function startSale() onlyMainAdmin public {
+    require(!openSale, 'GDP PrivateSale: sale already started!!!');
     openSale = true;
     roundStartBlock = block.number;
   }
@@ -69,6 +72,7 @@ contract PrivateSale is Auth {
   }
 
   function finish() onlyMainAdmin public {
+    require(openSale, 'GDP PrivateSale: sale is not opening or already stopped!!!');
     uint totalSold;
     for (uint i = 1; i <= totalRound; i++) {
       totalSold = totalSold.add(sold[i]);
@@ -94,25 +98,23 @@ contract PrivateSale is Auth {
 
   // PUBLIC FUNCTIONS
 
+  function checkWhitelist(address _address, bytes32[] _path) public view returns (bool) {
+    bytes32 hash = keccak256(abi.encodePacked(_address));
+    return MerkleProof.verify(_path, rootHash, hash);
+  }
+
   function buyWhiteList(uint _usdtAmount, bytes32[] _path) public {
     require(openSale, 'GDP PrivateSale: sale is not open!!!');
     require(whitelistOpened, 'GDP PrivateSale: whitelist is not opened!!!');
     bytes32 hash = keccak256(abi.encodePacked(_msgSender()));
     require(MerkleProof.verify(_path, rootHash, hash), 'GDP PrivateSale: 400');
-    buy(_usdtAmount);
+    _buy(_usdtAmount);
   }
 
   function buy(uint _usdtAmount) public {
     require(openSale, 'GDP PrivateSale: sale is not open!!!');
     require(!whitelistOpened, 'GDP PrivateSale: whitelist is opening!!!');
-    User storage user = users[_msgSender()];
-    if (user.userAddress == address(0)) {
-      user.userAddress = _msgSender();
-      user.amounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    }
-    _validateUserCap(user, _usdtAmount);
-    _updateRound();
-    _buy(user, _usdtAmount);
+    _buy(_usdtAmount);
   }
 
   function claim() public {
@@ -130,60 +132,88 @@ contract PrivateSale is Auth {
 
   function myInfo() public view returns (uint, uint) {
     User storage user = users[_msgSender()];
+    if (user.userAddress == address(0)) {
+      return (0, 0);
+    }
     uint userSpent;
     uint userToken;
     for (uint i = 1; i <= totalRound; i++) {
-      userSpent = userSpent.add(user.amounts[i].div(1e18).mul(prices[i]));
+      userSpent = userSpent.add(user.amounts[i].div(decimal18).mul(prices[i]));
       userToken = userToken.add(user.amounts[i]);
     }
     return (userSpent, userToken);
   }
 
-  // PRIVATE FUNCTIONS
 
-  function _updateRound() private {
+  function userInfo(address _address) public view returns (uint, uint) {
+    User storage user = users[_address];
+    if (user.userAddress == address(0)) {
+      return (0, 0);
+    }
+    uint userSpent;
+    uint userToken;
+    for (uint i = 1; i <= totalRound; i++) {
+      userSpent = userSpent.add(user.amounts[i].div(decimal18).mul(prices[i]));
+      userToken = userToken.add(user.amounts[i]);
+    }
+    return (userSpent, userToken);
+  }
+
+  function updateRound() public {
     uint blockPassed = block.number - roundStartBlock;
     if (blockPassed > blocksPerRound) {
       uint roundPassed = blockPassed / blocksPerRound;
       if (currentRound + roundPassed <= totalRound) {
         roundStartBlock += (roundPassed * blocksPerRound);
         currentRound += roundPassed;
+        emit RoundUpdated(currentRound);
       }
     }
   }
 
-  function _buy(User storage _user, uint _usdtAmount) private {
+  // PRIVATE FUNCTIONS
+
+  function _buy(uint _usdtAmount) private {
     if (_usdtAmount <= 0) {
       return;
     }
-    uint tokenLeftInRound = amounts[currentRound] - sold[currentRound];
-    uint usdtLeftInRound = tokenLeftInRound * prices[currentRound];
+    User storage user = users[_msgSender()];
+    if (user.userAddress == address(0)) {
+      user.userAddress = _msgSender();
+      user.amounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    }
+    _validateUserCap(user, _usdtAmount);
+    updateRound();
+    uint tokenLeftInRound = amounts[currentRound].sub(sold[currentRound]);
+    require(tokenLeftInRound > 0, 'GDP PrivateSale: token sold!!!');
+    uint usdtLeftInRound = tokenLeftInRound.mul(prices[currentRound]).div(decimal18);
     if (_usdtAmount < usdtLeftInRound) {
-      uint willSaleTokenAmount = _usdtAmount * 1e18 / prices[currentRound];
-      _user.amounts[currentRound] = _user.amounts[currentRound].add(willSaleTokenAmount);
+      uint willSaleTokenAmount = _usdtAmount.mul(decimal18).div(prices[currentRound]);
+      user.amounts[currentRound] = user.amounts[currentRound].add(willSaleTokenAmount);
       sold[currentRound] = sold[currentRound].add(willSaleTokenAmount);
       usdtToken.transferFrom(_msgSender(), address(this), _usdtAmount);
       usdtToken.transfer(usdtHolder, _usdtAmount);
-      emit Bought(_user.userAddress, willSaleTokenAmount, currentRound, block.timestamp);
+      emit Bought(user.userAddress, willSaleTokenAmount, currentRound, block.timestamp);
     } else {
-      _user.amounts[currentRound] = _user.amounts[currentRound].add(tokenLeftInRound);
+      user.amounts[currentRound] = user.amounts[currentRound].add(tokenLeftInRound);
       sold[currentRound] = sold[currentRound].add(tokenLeftInRound);
       usdtToken.transferFrom(_msgSender(), address(this), usdtLeftInRound);
       usdtToken.transfer(usdtHolder, usdtLeftInRound);
-      emit Bought(_user.userAddress, tokenLeftInRound, currentRound, block.timestamp);
+      emit Bought(user.userAddress, tokenLeftInRound, currentRound, block.timestamp);
       if (currentRound == totalRound) {
         return;
       }
       currentRound += 1;
+      emit RoundUpdated(currentRound);
       roundStartBlock = block.number;
-      _buy(_user, _usdtAmount - usdtLeftInRound);
+      _buy(_usdtAmount.sub(usdtLeftInRound));
     }
   }
 
   function _validateUserCap(User storage user, uint _usdtAmount) private view {
     uint userSpent;
     for (uint i = 1; i <= totalRound; i++) {
-      userSpent = userSpent.add(user.amounts[i].div(1e18).mul(prices[i]));
+      userSpent = userSpent.add(user.amounts[i].div(decimal18).mul(prices[i]));
     }
     require(userSpent.add(_usdtAmount) <= cap, 'GDP PrivateSale: check your cap!!!');
   }

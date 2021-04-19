@@ -53,11 +53,12 @@ contract GOLDPEGASTOKEN is IBEP20, TokenAuth {
   string public constant _name = 'GOLDPEGASTOKEN';
   string public constant _symbol = 'GDP';
   uint8 public constant _decimals = 18;
-  uint256 public _totalSupply = 70e6 * (10 ** uint256(_decimals));
-  uint256 public constant farmingAllocation = 655e5 * (10 ** uint256(_decimals));
-  uint256 public constant privateSaleAllocation = 35e5 * (10 ** uint256(_decimals));
-  uint256 public constant liquidityPoolAllocation = 700e3 * (10 ** uint256(_decimals));
-  uint256 public constant airdropAllocation = 300e3 * (10 ** uint256(_decimals));
+  uint256 public _totalSupply = 700e6 * (10 ** uint256(_decimals));
+  uint256 public constant farmingAllocation = 645e6 * (10 ** uint256(_decimals));
+  uint256 public constant privateSaleAllocation = 35e6 * (10 ** uint256(_decimals));
+  uint256 public constant liquidityPoolAllocation = 7e6 * (10 ** uint256(_decimals));
+  uint256 public constant airdropAllocation = 3e6 * (10 ** uint256(_decimals));
+  uint256 public constant stakingAllocation = 10e6 * (10 ** uint256(_decimals));
 
   uint private farmingReleased = 0;
 
@@ -67,11 +68,12 @@ contract GOLDPEGASTOKEN is IBEP20, TokenAuth {
   mapping (address => mapping (address => uint256)) private _allowed;
   mapping (address => bool) lock;
 
-  constructor(address _liquidityPool, address _airdrop) public TokenAuth(msg.sender) {
+  constructor(address _liquidityPool, address _airdrop, address _staking) public TokenAuth(msg.sender) {
     _balances[address(this)] = _totalSupply;
+    emit Transfer(address(0), address(this), _totalSupply);
     _transfer(address(this), _liquidityPool, liquidityPoolAllocation);
     _transfer(address(this), _airdrop, airdropAllocation);
-    emit Transfer(address(0), address(this), _totalSupply);
+    _transfer(address(this), _staking, stakingAllocation);
   }
 
   function releasePrivateSaleAllocation(address _contract) public onlyOwner {

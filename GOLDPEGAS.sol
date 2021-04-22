@@ -1,209 +1,241 @@
 pragma solidity 0.4.25;
 
-import './libs/goldpegas/Auth.sol';
-import './libs/goldpegas/MerkelProof.sol';
-import './libs/zeppelin/math/SafeMath.sol';
 import './libs/zeppelin/token/BEP20/IBEP20.sol';
-import './libs/zeppelin/token/BEP20/IGDP.sol';
+import './libs/zeppelin/math/SafeMath.sol';
+import './libs/goldpegas/Context.sol';
 
-contract PrivateSale is Auth {
-  using SafeMath for uint;
-  struct User {
-    address userAddress;
-    uint[] amounts;
-    uint totalUSDT;
-    uint totalGDP;
-  }
+contract TokenAuth is Context {
 
-  IGDP public gdpToken;
-  IBEP20 public usdtToken;
+  address internal owner;
+  mapping (address => bool) public farmAddresses;
 
-  uint[] public amounts = [0, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 1e24, 2e24, 2e24, 2e24, 2e24, 2e24, 3e24, 3e24, 3e24, 3e24, 3e24];
-  uint[] public prices = [0, 30e15, 36e15, 42e15, 48e15, 54e15, 60e15, 66e15, 72e15, 78e15, 84e15, 90e15, 96e15, 102e15, 108e15, 114e15, 120e15, 126e15, 132e15, 138e15, 144e15];
-  uint[] public sold = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  uint public cap = 1e25;
-  uint constant decimal18 = 1e18;
-  uint public constant blocksPerRound = 144000;
-  uint constant totalRound = 20;
-  uint constant privateSaleAllocation = 35e24;
-  address private usdtHolder;
-  uint public roundStartBlock;
-  bool public openSale;
-  bool public whitelistOpened;
-  uint public currentRound = 1;
-  bytes32 public rootHash;
-
-  mapping (address => User) private users;
-
-  event Bought(address indexed _user, uint _amount, uint _round, uint _timestamp);
-  event Claimed(address indexed _user, uint _amount);
-  event WhiteListUpdated(bool _open);
-  event RoundUpdated(uint _currentRound);
+  event OwnershipTransferred(address indexed _previousOwner, address indexed _newOwner);
 
   constructor(
-    address _mainAdmin,
-    address _backupAdmin,
-    address _usdtHolder,
-    address _gdpToken,
-    address _busdtToken
-  ) public Auth(_mainAdmin, _backupAdmin) {
-    usdtHolder = _usdtHolder;
-    gdpToken = IGDP(_gdpToken);
-    usdtToken = IBEP20(_busdtToken);
+    address _owner
+  ) internal {
+    owner = _owner;
   }
 
-  // OWNER FUNCTIONS
-
-  function setRootHash(bytes32 _rootHash) onlyMainAdmin public {
-    rootHash = _rootHash;
+  modifier onlyOwner() {
+    require(isOwner(), 'onlyOwner');
+    _;
   }
 
-  function setCap(uint _cap) onlyMainAdmin public {
-    cap = _cap;
+  modifier onlyFarmContract() {
+    require(isOwner() || isFarmContract(), 'Ownable: invalid caller');
+    _;
   }
 
-  function startSale() onlyMainAdmin public {
-    require(!openSale, 'GDP PrivateSale: sale already started!!!');
-    openSale = true;
-    roundStartBlock = block.number;
+  function _transferOwnership(address _newOwner) onlyOwner internal {
+    require(_newOwner != address(0), 'Ownable: invalid new owner');
+    owner = _newOwner;
+    emit OwnershipTransferred(_msgSender(), _newOwner);
   }
 
-  function updateWhiteList(bool _open) onlyMainAdmin public {
-    whitelistOpened = _open;
-    emit WhiteListUpdated(_open);
+  function setFarmAddress(address _farmAddress, bool _status) public onlyOwner {
+    require(_farmAddress != address(0), 'Ownable: farm address is the zero address');
+    farmAddresses[_farmAddress] = _status;
   }
 
-  function finish() onlyMainAdmin public {
-    require(openSale, 'GDP PrivateSale: sale is not opening or already stopped!!!');
-    uint totalSold;
-    for (uint i = 1; i <= totalRound; i++) {
-      totalSold = totalSold.add(sold[i]);
+  function isOwner() public view returns (bool) {
+    return _msgSender() == owner;
+  }
+
+  function isFarmContract() public view returns (bool) {
+    return farmAddresses[_msgSender()];
+  }
+}
+
+contract GOLDPEGASTOKEN is IBEP20, TokenAuth {
+  using SafeMath for uint256;
+
+  string public constant _name = 'GOLDPEGASTOKEN';
+  string public constant _symbol = 'GDP';
+  uint8 public constant _decimals = 18;
+  uint256 public _totalSupply = 700e6 * (10 ** uint256(_decimals));
+  uint256 public constant farmingAllocation = 645e6 * (10 ** uint256(_decimals));
+  uint256 public constant privateSaleAllocation = 35e6 * (10 ** uint256(_decimals));
+  uint256 public constant liquidityPoolAllocation = 7e6 * (10 ** uint256(_decimals));
+  uint256 public constant airdropAllocation = 3e6 * (10 ** uint256(_decimals));
+  uint256 public constant stakingAllocation = 10e6 * (10 ** uint256(_decimals));
+
+  uint private farmingReleased = 0;
+
+  bool releasePrivateSale;
+
+  mapping (address => uint256) internal _balances;
+  mapping (address => mapping (address => uint256)) private _allowed;
+  mapping (address => bool) lock;
+
+  constructor(address _liquidityPool, address _airdrop, address _staking) public TokenAuth(msg.sender) {
+    _balances[address(this)] = _totalSupply;
+    emit Transfer(address(0), address(this), _totalSupply);
+    _transfer(address(this), _liquidityPool, liquidityPoolAllocation);
+    _transfer(address(this), _airdrop, airdropAllocation);
+    _transfer(address(this), _staking, stakingAllocation);
+  }
+
+  function releasePrivateSaleAllocation(address _contract) public onlyOwner {
+    require(!releasePrivateSale, 'Private sale had released!!!');
+    releasePrivateSale = true;
+    _transfer(address(this), _contract, privateSaleAllocation);
+  }
+
+  function releaseFarmAllocation(address _farmerAddress, uint256 _amount) public onlyFarmContract {
+    require(farmingReleased.add(_amount) <= farmingAllocation, 'Max farming allocation had released!!!');
+    _transfer(address(this), _farmerAddress, _amount);
+    farmingReleased = farmingReleased.add(_amount);
+  }
+
+  function symbol() public view returns (string memory) {
+    return _symbol;
+  }
+
+  function name() public view returns (string memory) {
+    return _name;
+  }
+
+  function totalSupply() public view returns (uint) {
+    return _totalSupply;
+  }
+
+  function decimals() public view returns (uint8) {
+    return _decimals;
+  }
+
+  /**
+   * @dev Gets the balance of the specified address.
+   * @param owner The address to query the balance of.
+   * @return A uint256 representing the amount owned by the passed adfunction transferdress.
+   */
+  function balanceOf(address owner) public view returns (uint256) {
+    return _balances[owner];
+  }
+
+  /**
+   * @dev Function to check the amount of tokens that an owner allowed to a spender.
+   * @param owner address The address which owns the funds.
+   * @param spender address The address which will spend the funds.
+   * @return A uint256 specifying the amount of tokens still available for the spender.
+   */
+  function allowance(address owner, address spender) public view returns (uint256) {
+    return _allowed[owner][spender];
+  }
+
+  /**
+   * @dev Transfer token to a specified address.
+   * @param to The address to transfer to.
+   * @param value The amount to be transferred.
+   */
+  function transfer(address to, uint256 value) public returns (bool) {
+    _transfer(msg.sender, to, value);
+    return true;
+  }
+
+  /**
+   * @dev Approve the passed address to spend the specified amount of tokens on behalf of msg.sender.
+   * Beware that changing an allowance with this method brings the risk that someone may use both the old
+   * and the new allowance by unfortunate transaction ordering. One possible solution to mitigate this
+   * race condition is to first reduce the spender's allowance to 0 and set the desired value afterwards:
+   * https://github.com/ethereum/EIPs/issues/20#issuecomment-263524729
+   * @param spender The address which will spend the funds.
+   * @param value The amount of tokens to be spent.
+   */
+  function approve(address spender, uint256 value) public returns (bool) {
+    _approve(msg.sender, spender, value);
+    return true;
+  }
+
+  /**
+   * @dev Transfer tokens from one address to another.
+   * Note that while this function emits an Approval event, this is not required as per the specification,
+   * and other compliant implementations may not emit the event.
+   * @param from address The address which you want to send tokens from
+   * @param to address The address which you want to transfer to
+   * @param value uint256 the amount of tokens to be transferred
+   */
+  function transferFrom(address from, address to, uint256 value) public returns (bool) {
+    _transfer(from, to, value);
+    _approve(from, msg.sender, _allowed[from][msg.sender].sub(value));
+    return true;
+  }
+
+  /**
+   * @dev Increase the amount of tokens that an owner allowed to a spender.
+   * approve should be called when _allowed[msg.sender][spender] == 0. To increment
+   * allowed value is better to use this function to avoid 2 calls (and wait until
+   * the first transaction is mined)
+   * From MonolithDAO Token.sol
+   * Emits an Approval event.
+   * @param spender The address which will spend the funds.
+   * @param addedValue The amount of tokens to increase the allowance by.
+   */
+  function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
+    _approve(msg.sender, spender, _allowed[msg.sender][spender].add(addedValue));
+    return true;
+  }
+
+  /**
+   * @dev Decrease the amount of tokens that an owner allowed to a spender.
+   * approve should be called when _allowed[msg.sender][spender] == 0. To decrement
+   * allowed value is better to use this function to avoid 2 calls (and wait until
+   * the first transaction is mined)
+   * From MonolithDAO Token.sol
+   * Emits an Approval event.
+   * @param spender The address which will spend the funds.
+   * @param subtractedValue The amount of tokens to decrease the allowance by.
+   */
+  function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
+    _approve(msg.sender, spender, _allowed[msg.sender][spender].sub(subtractedValue));
+    return true;
+  }
+
+  /**
+   * @dev Transfer token for a specified addresses.
+   * @param from The address to transfer from.
+   * @param to The address to transfer to.
+   * @param value The amount to be transferred.
+   */
+  function _transfer(address from, address to, uint256 value) internal {
+    require(!lock[from], 'You can not do this at the moment');
+    _balances[from] = _balances[from].sub(value);
+    _balances[to] = _balances[to].add(value);
+    if (to == address(0)) {
+      _totalSupply = _totalSupply.sub(value);
     }
-    openSale = false;
-    gdpToken.burn(privateSaleAllocation.sub(totalSold));
+    emit Transfer(from, to, value);
   }
 
-  function updateMainAdmin(address _newMainAdmin) onlyBackupAdmin public {
-    require(_newMainAdmin != address(0), 'GDP PrivateSale: invalid mainAdmin address');
-    mainAdmin = _newMainAdmin;
+  /**
+   * @dev Approve an address to spend another addresses' tokens.
+   * @param owner The address that owns the tokens.
+   * @param spender The address that will spend the tokens.
+   * @param value The number of tokens that can be spent.
+   */
+  function _approve(address owner, address spender, uint256 value) internal {
+    require(spender != address(0));
+    require(owner != address(0));
+
+    _allowed[owner][spender] = value;
+    emit Approval(owner, spender, value);
   }
 
-  function updateBackupAdmin(address _newBackupAdmin) onlyBackupAdmin public {
-    require(_newBackupAdmin != address(0), 'GDP PrivateSale: invalid backupAdmin address');
-    backupAdmin = _newBackupAdmin;
+  function burn(uint256 _amount) external {
+    _balances[msg.sender] = _balances[msg.sender].sub(_amount);
+    _totalSupply = _totalSupply.sub(_amount);
+    emit Transfer(msg.sender, address(0), _amount);
   }
 
-  function updateUsdtHolder(address _newUsdtHolder) onlyMainAdmin public {
-    require(_newUsdtHolder != address(0), 'GDP PrivateSale: invalid usdtHolder address');
-    usdtHolder = _newUsdtHolder;
+  function updateLockStatus(address _address, bool locked) onlyOwner public {
+    lock[_address] = locked;
   }
 
-  // PUBLIC FUNCTIONS
-
-  function checkWhitelist(address _address, bytes32[] _path) public view returns (bool) {
-    bytes32 hash = keccak256(abi.encodePacked(_address));
-    return MerkleProof.verify(_path, rootHash, hash);
+  function checkLockStatus(address _address) public view returns (bool) {
+    return lock[_address];
   }
 
-  function buyWhiteList(uint _usdtAmount, bytes32[] _path) public {
-    require(openSale, 'GDP PrivateSale: sale is not open!!!');
-    require(whitelistOpened, 'GDP PrivateSale: whitelist is not opened!!!');
-    bytes32 hash = keccak256(abi.encodePacked(_msgSender()));
-    require(MerkleProof.verify(_path, rootHash, hash), 'GDP PrivateSale: 400');
-    _buy(_usdtAmount);
-  }
-
-  function buy(uint _usdtAmount) public {
-    require(openSale, 'GDP PrivateSale: sale is not open!!!');
-    require(!whitelistOpened, 'GDP PrivateSale: whitelist is opening!!!');
-    _buy(_usdtAmount);
-  }
-
-  function claim() public {
-    require(!openSale, 'GDP PrivateSale: sale is not finished!!!');
-    User storage user = users[_msgSender()];
-    uint userToken;
-    for (uint i = 1; i <= totalRound; i++) {
-      userToken = userToken.add(user.amounts[i]);
-    }
-    if (userToken > 0) {
-      gdpToken.transfer(user.userAddress, userToken);
-      user.totalGDP = 0;
-      emit Claimed(user.userAddress, userToken);
-    }
-  }
-
-  function myInfo() public view returns (uint, uint) {
-    User storage user = users[_msgSender()];
-    if (user.userAddress == address(0)) {
-      return (0, 0);
-    }
-    return (user.totalUSDT, user.totalGDP);
-  }
-
-  function updateRound() public {
-    require(openSale, 'GDP PrivateSale: sale is not open!!!');
-    uint blockPassed = block.number - roundStartBlock;
-    if (blockPassed > blocksPerRound) {
-      uint roundPassed = blockPassed / blocksPerRound;
-      if (currentRound + roundPassed <= totalRound) {
-        roundStartBlock += (roundPassed * blocksPerRound);
-        currentRound += roundPassed;
-        emit RoundUpdated(currentRound);
-      }
-    }
-  }
-
-  // PRIVATE FUNCTIONS
-
-  function _buy(uint _usdtAmount) private {
-    if (_usdtAmount <= 0) {
-      return;
-    }
-    User storage user = users[_msgSender()];
-    if (user.userAddress == address(0)) {
-      user.userAddress = _msgSender();
-      user.amounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      user.totalGDP = 0;
-      user.totalUSDT = 0;
-    }
-    _validateUserCap(user, _usdtAmount);
-    updateRound();
-    uint tokenLeftInRound = amounts[currentRound].sub(sold[currentRound]);
-    require(tokenLeftInRound > 0, 'GDP PrivateSale: token sold!!!');
-    uint usdtLeftInRound = tokenLeftInRound.mul(prices[currentRound]).div(decimal18);
-    if (_usdtAmount < usdtLeftInRound) {
-      uint willSaleTokenAmount = _usdtAmount.mul(decimal18).div(prices[currentRound]);
-      user.amounts[currentRound] = user.amounts[currentRound].add(willSaleTokenAmount);
-      user.totalGDP = user.totalGDP.add(willSaleTokenAmount);
-      user.totalUSDT = user.totalUSDT.add(_usdtAmount);
-      sold[currentRound] = sold[currentRound].add(willSaleTokenAmount);
-      usdtToken.transferFrom(_msgSender(), address(this), _usdtAmount);
-      usdtToken.transfer(usdtHolder, _usdtAmount);
-      emit Bought(user.userAddress, willSaleTokenAmount, currentRound, block.timestamp);
-    } else {
-      user.amounts[currentRound] = user.amounts[currentRound].add(tokenLeftInRound);
-      user.totalGDP = user.totalGDP.add(tokenLeftInRound);
-      user.totalUSDT = user.totalUSDT.add(_usdtAmount);
-      sold[currentRound] = sold[currentRound].add(tokenLeftInRound);
-      usdtToken.transferFrom(_msgSender(), address(this), usdtLeftInRound);
-      usdtToken.transfer(usdtHolder, usdtLeftInRound);
-      emit Bought(user.userAddress, tokenLeftInRound, currentRound, block.timestamp);
-      if (currentRound == totalRound) {
-        return;
-      }
-      currentRound += 1;
-      roundStartBlock = block.number;
-      emit RoundUpdated(currentRound);
-      _buy(_usdtAmount.sub(usdtLeftInRound));
-    }
-  }
-
-  function _validateUserCap(User storage user, uint _usdtAmount) private view {
-    uint userSpent;
-    for (uint i = 1; i <= totalRound; i++) {
-      userSpent = userSpent.add(user.amounts[i].div(decimal18).mul(prices[i]));
-    }
-    require(userSpent.add(_usdtAmount) <= cap, 'GDP PrivateSale: check your cap!!!');
+  function transferOwnership(address _newOwner) public {
+    _transferOwnership(_newOwner);
   }
 }

@@ -31,14 +31,16 @@ contract PrivateSale is Auth {
   bool public openSale;
   bool public whitelistOpened;
   uint public currentRound = 1;
+  uint public totalUSDT;
+  uint public totalGDP;
   bytes32 public rootHash;
 
   mapping (address => User) private users;
 
   event Bought(address indexed _user, uint _amount, uint _round, uint _timestamp);
-  event Claimed(address indexed _user, uint _amount);
+  event Claimed(address indexed _user, uint _amount, uint _timestamp);
   event WhiteListUpdated(bool _open);
-  event RoundUpdated(uint _currentRound);
+  event RoundUpdated(uint _currentRound, uint _roundStartBlock);
 
   constructor(
     address _mainAdmin,
@@ -98,6 +100,11 @@ contract PrivateSale is Auth {
     usdtHolder = _newUsdtHolder;
   }
 
+  function setToken(address _gdpToken) onlyMainAdmin public {
+    require(_gdpToken != address(0), 'GDP PrivateSale: invalid token address');
+    gdpToken = IGDP(_gdpToken);
+  }
+
   // PUBLIC FUNCTIONS
 
   function checkWhitelist(address _address, bytes32[] _path) public view returns (bool) {
@@ -129,7 +136,7 @@ contract PrivateSale is Auth {
     if (userToken > 0) {
       gdpToken.transfer(user.userAddress, userToken);
       user.totalGDP = 0;
-      emit Claimed(user.userAddress, userToken);
+      emit Claimed(user.userAddress, userToken, block.timestamp);
     }
   }
 
@@ -149,7 +156,7 @@ contract PrivateSale is Auth {
       if (currentRound + roundPassed <= totalRound) {
         roundStartBlock += (roundPassed * blocksPerRound);
         currentRound += roundPassed;
-        emit RoundUpdated(currentRound);
+        emit RoundUpdated(currentRound, roundStartBlock);
       }
     }
   }
@@ -174,18 +181,12 @@ contract PrivateSale is Auth {
     uint usdtLeftInRound = tokenLeftInRound.mul(prices[currentRound]).div(decimal18);
     if (_usdtAmount < usdtLeftInRound) {
       uint willSaleTokenAmount = _usdtAmount.mul(decimal18).div(prices[currentRound]);
-      user.amounts[currentRound] = user.amounts[currentRound].add(willSaleTokenAmount);
-      user.totalGDP = user.totalGDP.add(willSaleTokenAmount);
-      user.totalUSDT = user.totalUSDT.add(_usdtAmount);
-      sold[currentRound] = sold[currentRound].add(willSaleTokenAmount);
+      updateStatistic(user, _usdtAmount, willSaleTokenAmount);
       usdtToken.transferFrom(_msgSender(), address(this), _usdtAmount);
       usdtToken.transfer(usdtHolder, _usdtAmount);
       emit Bought(user.userAddress, willSaleTokenAmount, currentRound, block.timestamp);
     } else {
-      user.amounts[currentRound] = user.amounts[currentRound].add(tokenLeftInRound);
-      user.totalGDP = user.totalGDP.add(tokenLeftInRound);
-      user.totalUSDT = user.totalUSDT.add(_usdtAmount);
-      sold[currentRound] = sold[currentRound].add(tokenLeftInRound);
+      updateStatistic(user, usdtLeftInRound, tokenLeftInRound);
       usdtToken.transferFrom(_msgSender(), address(this), usdtLeftInRound);
       usdtToken.transfer(usdtHolder, usdtLeftInRound);
       emit Bought(user.userAddress, tokenLeftInRound, currentRound, block.timestamp);
@@ -194,9 +195,18 @@ contract PrivateSale is Auth {
       }
       currentRound += 1;
       roundStartBlock = block.number;
-      emit RoundUpdated(currentRound);
+      emit RoundUpdated(currentRound, roundStartBlock);
       _buy(_usdtAmount.sub(usdtLeftInRound));
     }
+  }
+
+  function updateStatistic(User storage user, uint _usdtAmount, uint _gdpAmount) private {
+    user.amounts[currentRound] = user.amounts[currentRound].add(_gdpAmount);
+    user.totalUSDT = user.totalUSDT.add(_usdtAmount);
+    user.totalGDP = user.totalGDP.add(_gdpAmount);
+    totalUSDT = totalUSDT.add(_usdtAmount);
+    totalGDP = totalGDP.add(_gdpAmount);
+    sold[currentRound] = sold[currentRound].add(_gdpAmount);
   }
 
   function _validateUserCap(User storage user, uint _usdtAmount) private view {

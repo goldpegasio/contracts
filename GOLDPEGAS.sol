@@ -54,38 +54,56 @@ contract GOLDPEGASTOKEN is IBEP20, TokenAuth {
   string public constant _symbol = 'GDP';
   uint8 public constant _decimals = 18;
   uint256 public _totalSupply = 700e6 * (10 ** uint256(_decimals));
-  uint256 public constant farmingAllocation = 645e6 * (10 ** uint256(_decimals));
-  uint256 public constant privateSaleAllocation = 35e6 * (10 ** uint256(_decimals));
-  uint256 public constant liquidityPoolAllocation = 7e6 * (10 ** uint256(_decimals));
   uint256 public constant airdropAllocation = 3e6 * (10 ** uint256(_decimals));
+  uint256 public constant farmingAllocation = 645e6 * (10 ** uint256(_decimals));
+  uint256 public constant liquidityPoolAllocation = 7e6 * (10 ** uint256(_decimals));
+  uint256 public constant privateSaleAllocation = 35e6 * (10 ** uint256(_decimals));
   uint256 public constant stakingAllocation = 10e6 * (10 ** uint256(_decimals));
 
   uint private farmingReleased = 0;
 
+  bool releaseAirdrop;
+  bool releaseLiquidityPool;
   bool releasePrivateSale;
+  bool releaseStaking;
 
   mapping (address => uint256) internal _balances;
   mapping (address => mapping (address => uint256)) private _allowed;
   mapping (address => bool) lock;
 
-  constructor(address _liquidityPool, address _airdrop, address _staking) public TokenAuth(msg.sender) {
+  constructor() public TokenAuth(msg.sender) {
     _balances[address(this)] = _totalSupply;
     emit Transfer(address(0), address(this), _totalSupply);
-    _transfer(address(this), _liquidityPool, liquidityPoolAllocation);
-    _transfer(address(this), _airdrop, airdropAllocation);
-    _transfer(address(this), _staking, stakingAllocation);
   }
 
-  function releasePrivateSaleAllocation(address _contract) public onlyOwner {
-    require(!releasePrivateSale, 'Private sale had released!!!');
-    releasePrivateSale = true;
-    _transfer(address(this), _contract, privateSaleAllocation);
+  function releaseAirdropAllocation(address _contract) public onlyOwner {
+    require(!releaseAirdrop, 'Airdrop Allocation had released!!!');
+    releaseAirdrop = true;
+    _transfer(address(this), _contract, airdropAllocation);
   }
 
   function releaseFarmAllocation(address _farmerAddress, uint256 _amount) public onlyFarmContract {
     require(farmingReleased.add(_amount) <= farmingAllocation, 'Max farming allocation had released!!!');
     _transfer(address(this), _farmerAddress, _amount);
     farmingReleased = farmingReleased.add(_amount);
+  }
+
+  function releaseLiquidityPoolAllocation(address _contract) public onlyOwner {
+    require(!releaseLiquidityPool, 'LiquidityPool Allocation had released!!!');
+    releaseLiquidityPool = true;
+    _transfer(address(this), _contract, liquidityPoolAllocation);
+  }
+
+  function releasePrivateSaleAllocation(address _contract) public onlyOwner {
+    require(!releasePrivateSale, 'Private sale Allocation had released!!!');
+    releasePrivateSale = true;
+    _transfer(address(this), _contract, privateSaleAllocation);
+  }
+
+  function releaseStakingAllocation(address _contract) public onlyOwner {
+    require(!releaseStaking, 'Staking Allocation had released!!!');
+    releaseStaking = true;
+    _transfer(address(this), _contract, stakingAllocation);
   }
 
   function symbol() public view returns (string memory) {
@@ -239,3 +257,4 @@ contract GOLDPEGASTOKEN is IBEP20, TokenAuth {
     _transferOwnership(_newOwner);
   }
 }
+
